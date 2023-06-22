@@ -83,6 +83,16 @@ fn main() -> ! {
         &pins.gpio6.into_pull_up_input(),
     ];
 
+    let press: [Keyboard; 7] = [
+        Keyboard::Q,
+        Keyboard::W,
+        Keyboard::E,
+        Keyboard::Space,
+        Keyboard::I,
+        Keyboard::O,
+        Keyboard::P,
+    ];
+
     led_pin.set_low().ok();
 
     let mut input_count_down = timer.count_down();
@@ -94,7 +104,7 @@ fn main() -> ! {
     loop {
         //Poll the keys every 5ms
         if input_count_down.wait().is_ok() {
-            let keys = get_keys(keys);
+            let keys = get_keys(keys, press);
 
             match keyboard.device().write_report(keys) {
                 Err(UsbHidError::WouldBlock) => {}
@@ -133,47 +143,10 @@ fn main() -> ! {
     }
 }
 
-fn get_keys(keys: &[&dyn InputPin<Error = Infallible>]) -> [Keyboard; 8] {
-    [
-        if keys[0].is_low().unwrap() {
-            Keyboard::Q
-        } else {
-            Keyboard::NoEventIndicated
-        }, //Q
-        if keys[1].is_low().unwrap() {
-            Keyboard::W
-        } else {
-            Keyboard::NoEventIndicated
-        }, //W
-        if keys[2].is_low().unwrap() {
-            Keyboard::E
-        } else {
-            Keyboard::NoEventIndicated
-        }, //E
-        if keys[3].is_low().unwrap() {
-            Keyboard::Space
-        } else {
-            Keyboard::NoEventIndicated
-        }, //Space
-        if keys[4].is_low().unwrap() {
-            Keyboard::I
-        } else {
-            Keyboard::NoEventIndicated
-        }, //I
-        if keys[5].is_low().unwrap() {
-            Keyboard::O
-        } else {
-            Keyboard::NoEventIndicated
-        }, //O
-        if keys[6].is_low().unwrap() {
-            Keyboard::P
-        } else {
-            Keyboard::NoEventIndicated
-        }, //P
-        if keys[6].is_low().unwrap() {
-            Keyboard::U
-        } else {
-            Keyboard::NoEventIndicated
-        }, //U
-    ]
+fn get_keys(keys: &[&dyn InputPin<Error = Infallible>], press: [Keyboard; 7]) -> [Keyboard; 7] {
+    let mut key_return = [Keyboard::NoEventIndicated; 7];
+    for i in 0..7 {
+        if keys[i].is_low().unwrap() { key_return[i] = press[i] };
+    }
+    return key_return;
 }
