@@ -3,7 +3,7 @@
 
 use bsp::entry;
 use bsp::hal;
-use core::convert::Infallible;
+//use core::convert::Infallible;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::*;
@@ -18,6 +18,21 @@ use usbd_human_interface_device::page::Keyboard;
 use usbd_human_interface_device::prelude::*;
 
 use rp_pico as bsp;
+
+use heapless::Vec;
+
+struct PinKeys<'a> {
+    pin_port: &'a dyn InputPin<Error = core::convert::Infallible>,
+    keys: &'a Vec<Keyboard, 4>, //Max 4 keys
+}
+
+macro_rules! def_key {
+    ($pin_port: expr, $keys: expr) => {
+        PinKeys{
+            pin_port: &$pin_port.into_pull_up_input(), 
+            keys: &(Vec::from_slice(&$keys).unwrap())}          
+    };
+}
 
 #[entry]
 fn main() -> ! {
@@ -73,24 +88,15 @@ fn main() -> ! {
     //GPIO pins
     let mut led_pin = pins.gpio25.into_push_pull_output();
 
-    let keys: &[&dyn InputPin<Error = core::convert::Infallible>] = &[
-        &pins.gpio0.into_pull_up_input(),
-        &pins.gpio1.into_pull_up_input(),
-        &pins.gpio2.into_pull_up_input(),
-        &pins.gpio3.into_pull_up_input(),
-        &pins.gpio4.into_pull_up_input(),
-        &pins.gpio5.into_pull_up_input(),
-        &pins.gpio6.into_pull_up_input(),
-    ];
-
-    let press: [Keyboard; 7] = [
-        Keyboard::Q,
-        Keyboard::W,
-        Keyboard::E,
-        Keyboard::Space,
-        Keyboard::I,
-        Keyboard::O,
-        Keyboard::P,
+    let pin_build: &[PinKeys; 8] = &[
+        def_key!(pins.gpio0, [Keyboard::Q]),
+        def_key!(pins.gpio1, [Keyboard::W]),
+        def_key!(pins.gpio2, [Keyboard::E]),
+        def_key!(pins.gpio3, [Keyboard::Space]),
+        def_key!(pins.gpio4, [Keyboard::I]),
+        def_key!(pins.gpio5, [Keyboard::O]),
+        def_key!(pins.gpio6, [Keyboard::P]),
+        def_key!(pins.gpio7, [Keyboard::LeftControl, Keyboard::O]),
     ];
 
     led_pin.set_low().ok();
@@ -104,7 +110,8 @@ fn main() -> ! {
     loop {
         //Poll the keys every 5ms
         if input_count_down.wait().is_ok() {
-            let keys = get_keys(keys, press);
+            //let keys = get_keys(keys, press);
+            let keys = get_keys(pin_build);
 
             match keyboard.device().write_report(keys) {
                 Err(UsbHidError::WouldBlock) => {}
@@ -143,10 +150,16 @@ fn main() -> ! {
     }
 }
 
-fn get_keys(keys: &[&dyn InputPin<Error = Infallible>], press: [Keyboard; 7]) -> [Keyboard; 7] {
-    let mut key_return = [Keyboard::NoEventIndicated; 7];
-    for i in 0..7 {
-        if keys[i].is_low().unwrap() { key_return[i] = press[i] };
+fn get_keys(pins: &[PinKeys]) -> [Keyboard; 8]{
+    let mut key_return = [Keyboard::NoEventIndicated; 8];
+    let mut k = 0;
+    for i in 0..8 {
+        if pins[i].pin_port.is_low().unwrap() {
+            for j in 0..pins[i].keys.len() {
+                key_return[k] = pins[i].keys[j];
+                k += 1;
+            }
+        }
     }
     return key_return;
 }

@@ -191,6 +191,7 @@ dependencies = [
  "defmt-rtt",
  "embedded-hal",
  "fugit",
+ "heapless",
  "panic-probe",
  "rp-pico",
  "usb-device",
