@@ -16,16 +16,21 @@ use usb_device::class_prelude::*;
 use usb_device::prelude::*;
 use usbd_human_interface_device::page::Keyboard;
 use usbd_human_interface_device::prelude::*;
+use usbd_human_interface_device::device::keyboard::{NKROBootKeyboardConfig, NKRO_BOOT_KEYBOARD_REPORT_DESCRIPTOR};
+use usbd_human_interface_device::usb_class::prelude::{ManagedIdleInterfaceConfig, InterfaceBuilder};
+use usbd_human_interface_device::descriptor::InterfaceProtocol;
 
 use rp_pico as bsp;
 
 use heapless::Vec;
 
+//Struct for easier gpio -> keypress interface
 struct PinKeys<'a> {
     pin_port: &'a dyn InputPin<Error = core::convert::Infallible>,
     keys: &'a Vec<Keyboard, 4>, //Max 4 keys
 }
 
+//Macro for struct creating for each gpio - keypress
 macro_rules! def_key {
     ($pin_port: expr, $keys: expr) => {
         PinKeys{
@@ -33,9 +38,12 @@ macro_rules! def_key {
             keys: &(Vec::from_slice(&$keys).unwrap())}          
     };
 }
+//Keys used
+const KEY_COUNT: usize = 8;
 
 #[entry]
 fn main() -> ! {
+    //Basic mcu control related interfaces
     let mut pac = pac::Peripherals::take().unwrap();
 
     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
@@ -72,11 +80,20 @@ fn main() -> ! {
         &mut pac.RESETS,
     ));
 
-    let mut keyboard = UsbHidClassBuilder::new()
-        .add_device(
-            usbd_human_interface_device::device::keyboard::NKROBootKeyboardConfig::default(),
-        )
-        .build(&usb_bus);
+    //Custon keyboard config for higher polling rate
+    let config = NKROBootKeyboardConfig::new(ManagedIdleInterfaceConfig::new(
+        unwrap!(unwrap!(unwrap!(unwrap!(InterfaceBuilder::new(
+            NKRO_BOOT_KEYBOARD_REPORT_DESCRIPTOR
+        ))
+        .description("NKRO Keyboard")
+        .boot_device(InterfaceProtocol::Keyboard)
+        .idle_default(500.millis()))
+        .in_endpoint(1.millis()))
+        .with_out_endpoint(100.millis()))
+        .build(),
+    ));
+
+    let mut keyboard = UsbHidClassBuilder::new().add_device(config).build(&usb_bus);
 
     //https://pid.codes
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x1209, 0x0001))
@@ -85,10 +102,11 @@ fn main() -> ! {
         .serial_number("TEST")
         .build();
 
-    //GPIO pins
+    //Status led pin
     let mut led_pin = pins.gpio25.into_push_pull_output();
 
-    let pin_build: &[PinKeys; 8] = &[
+    //GPIO -> Keypress relations
+    let pin_build: &[PinKeys; KEY_COUNT] = &[
         def_key!(pins.gpio0, [Keyboard::Q]),
         def_key!(pins.gpio1, [Keyboard::W]),
         def_key!(pins.gpio2, [Keyboard::E]),
@@ -102,15 +120,14 @@ fn main() -> ! {
     led_pin.set_low().ok();
 
     let mut input_count_down = timer.count_down();
-    input_count_down.start(5.millis());
+    input_count_down.start(1.millis());
 
     let mut tick_count_down = timer.count_down();
     tick_count_down.start(1.millis());
 
     loop {
-        //Poll the keys every 5ms
+        //Poll the keys every 1ms
         if input_count_down.wait().is_ok() {
-            //let keys = get_keys(keys, press);
             let keys = get_keys(pin_build);
 
             match keyboard.device().write_report(keys) {
@@ -150,15 +167,11 @@ fn main() -> ! {
     }
 }
 
-fn get_keys(pins: &[PinKeys]) -> [Keyboard; 8]{
-    let mut key_return = [Keyboard::NoEventIndicated; 8];
-    let mut k = 0;
-    for i in 0..8 {
+fn get_keys(pins: &[PinKeys]) -> Vec<Keyboard, KEY_COUNT>{
+    let mut key_return: Vec<Keyboard, KEY_COUNT> = Vec::new();
+    for i in 0..KEY_COUNT {
         if pins[i].pin_port.is_low().unwrap() {
-            for j in 0..pins[i].keys.len() {
-                key_return[k] = pins[i].keys[j];
-                k += 1;
-            }
+            key_return.extend(pins[i].keys.clone());
         }
     }
     return key_return;
