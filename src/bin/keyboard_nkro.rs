@@ -19,27 +19,14 @@ use usbd_human_interface_device::prelude::*;
 use usbd_human_interface_device::device::keyboard::{NKROBootKeyboardConfig, NKRO_BOOT_KEYBOARD_REPORT_DESCRIPTOR};
 use usbd_human_interface_device::usb_class::prelude::{ManagedIdleInterfaceConfig, InterfaceBuilder};
 use usbd_human_interface_device::descriptor::InterfaceProtocol;
-
 use rp_pico as bsp;
-
 use heapless::Vec;
+use hal::multicore::{Multicore, Stack};
+use firmware::*;
 
-//Struct for easier gpio -> keypress interface
-struct PinKeys<'a> {
-    pin_port: &'a dyn InputPin<Error = core::convert::Infallible>,
-    keys: &'a Vec<Keyboard, 4>, //Max 4 keys
-}
+const SYS_FREQ: u32 = 12_000_000;
 
-//Macro for struct creating for each gpio - keypress
-macro_rules! def_key {
-    ($pin_port: expr, $keys: expr) => {
-        PinKeys{
-            pin_port: &$pin_port.into_pull_up_input(), 
-            keys: &(Vec::from_slice(&$keys).unwrap())}          
-    };
-}
-//Keys used
-const KEY_COUNT: usize = 8;
+static mut CORE1_STACK: Stack<4096> = Stack::new();
 
 #[entry]
 fn main() -> ! {
@@ -61,15 +48,13 @@ fn main() -> ! {
 
     let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS);
 
-    let sio = hal::Sio::new(pac.SIO);
+    let mut sio = hal::Sio::new(pac.SIO);
     let pins = hal::gpio::Pins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
         sio.gpio_bank0,
         &mut pac.RESETS,
     );
-
-    info!("Starting");
 
     //USB
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
@@ -79,6 +64,53 @@ fn main() -> ! {
         true,
         &mut pac.RESETS,
     ));
+
+    let mut mc = Multicore::new(&mut pac.PSM, &mut pac.PPB, &mut sio.fifo);
+    let cores = mc.cores();
+    let core1 = &mut cores[1];
+    
+    let _test = core1.spawn(unsafe { &mut CORE1_STACK.mem }, move || {
+        let core = unsafe { pac::CorePeripherals::steal() };
+
+        let mut led_pin = pins.gpio16.into_push_pull_output();
+        let led_button  = pins.gpio17.into_pull_up_input();
+
+        let mut delay = cortex_m::delay::Delay::new(core.SYST, SYS_FREQ);
+
+        let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
+
+        //Generates the necessary pwm setup for each pin
+        
+        def_pwm!(pwm_slices, 
+            [pwm1_slice, pwm1, [pins.gpio18, channel_a, pwm1_a;
+                                pins.gpio19, channel_b, pwm1_b];
+            pwm2_slice, pwm2,  [pins.gpio20, channel_a, pwm2_a;
+                                pins.gpio21, channel_b, pwm2_b];
+            pwm3_slice, pwm3,  [pins.gpio22, channel_a, pwm3_a];
+            pwm5_slice, pwm5,  [pins.gpio26, channel_a, pwm5_a;
+                                pins.gpio27, channel_b, pwm5_b]]);
+
+        let mut pin_modes = PinModes::new();
+
+        led_pin.set_low().ok();
+        let mut prev: bool;
+        
+
+        loop {
+            prev = led_button.is_high().unwrap();
+            delay.delay_ms(5);
+
+            if prev && led_button.is_low().unwrap() {
+                led_pin.toggle().ok();
+                let temp = pin_modes.get_mode();
+                pin_modes.set_mode((temp + 1) % MODE_COUNT);
+            }
+            pwm_mode!(pin_modes, [pwm1_a, pwm1_b, pwm2_a, pwm2_b, pwm3_a, pwm5_a, pwm5_b]);
+            
+        }
+    });
+
+    info!("Starting");
 
     //Custon keyboard config for higher polling rate
     let config = NKROBootKeyboardConfig::new(ManagedIdleInterfaceConfig::new(
@@ -106,16 +138,19 @@ fn main() -> ! {
     let mut led_pin = pins.gpio25.into_push_pull_output();
 
     //GPIO -> Keypress relations
-    let pin_build: &[PinKeys; KEY_COUNT] = &[
-        def_key!(pins.gpio0, [Keyboard::Q]),
-        def_key!(pins.gpio1, [Keyboard::W]),
-        def_key!(pins.gpio2, [Keyboard::E]),
-        def_key!(pins.gpio3, [Keyboard::Space]),
-        def_key!(pins.gpio4, [Keyboard::I]),
-        def_key!(pins.gpio5, [Keyboard::O]),
-        def_key!(pins.gpio6, [Keyboard::P]),
-        def_key!(pins.gpio7, [Keyboard::LeftControl, Keyboard::O]),
-    ];
+    let (pins, keys): ([&dyn InputPin<Error = core::convert::Infallible>; KEY_COUNT], 
+        [&Vec<Keyboard, 4>; KEY_COUNT]) = 
+    pin_keys!(
+        pins.gpio0, [Keyboard::Q];
+        pins.gpio1, [Keyboard::W];
+        pins.gpio2, [Keyboard::E];
+        pins.gpio3, [Keyboard::Space];
+        pins.gpio4, [Keyboard::I];
+        pins.gpio5, [Keyboard::O];
+        pins.gpio6, [Keyboard::P];
+        pins.gpio7, [Keyboard::LeftControl, Keyboard::O]);
+
+    let pin_build = &get_pin_keys(pins, keys);      
 
     led_pin.set_low().ok();
 
@@ -170,8 +205,8 @@ fn main() -> ! {
 fn get_keys(pins: &[PinKeys]) -> Vec<Keyboard, KEY_COUNT>{
     let mut key_return: Vec<Keyboard, KEY_COUNT> = Vec::new();
     for i in 0..KEY_COUNT {
-        if pins[i].pin_port.is_low().unwrap() {
-            key_return.extend(pins[i].keys.clone());
+        if pins[i].get_pin().is_low().unwrap() {
+            key_return.extend(pins[i].get_keys().clone());
         }
     }
     return key_return;
