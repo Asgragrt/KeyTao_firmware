@@ -178,7 +178,7 @@ impl PinModes {
             increasing: true,
             counter: 0,
             time_counter: 0,
-            trail_speed: 2000, //50 * 5, 5 ms for key debounce
+            trail_speed: 250, //50 * 5, 5 ms for key debounce
         } 
     }
 
