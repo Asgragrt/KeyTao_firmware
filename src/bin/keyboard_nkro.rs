@@ -56,6 +56,8 @@ fn main() -> ! {
         &mut pac.RESETS,
     );
 
+    info!("Starting");
+
     //USB
     let usb_bus = UsbBusAllocator::new(hal::usb::UsbBus::new(
         pac.USBCTRL_REGS,
@@ -110,8 +112,6 @@ fn main() -> ! {
         }
     });
 
-    info!("Starting");
-
     //Custon keyboard config for higher polling rate
     let config = NKROBootKeyboardConfig::new(ManagedIdleInterfaceConfig::new(
         unwrap!(unwrap!(unwrap!(unwrap!(InterfaceBuilder::new(
@@ -139,8 +139,7 @@ fn main() -> ! {
 
     //GPIO -> Keypress relations
     let (pins, keys): ([&dyn InputPin<Error = core::convert::Infallible>; KEY_COUNT], 
-        [&Vec<Keyboard, 4>; KEY_COUNT]) = 
-    pin_keys!(
+        [&Vec<Keyboard, 4>; KEY_COUNT]) = pin_keys!(
         pins.gpio0, [Keyboard::Q];
         pins.gpio1, [Keyboard::W];
         pins.gpio2, [Keyboard::E];

@@ -3,7 +3,6 @@
 use usbd_human_interface_device::page::Keyboard;
 use embedded_hal::digital::v2::InputPin;
 use heapless::Vec;
-use libm::{powf, expf};
 
 //Keys used
 pub const KEY_COUNT: usize = 8;
@@ -87,12 +86,12 @@ macro_rules! def_pwm {
 }
 
 #[macro_export]
-macro_rules! min {
+macro_rules! min{
     ($x:expr, $y:expr) => {
-        if $x as f32 >= $y as f32 {
-            $y as f32
+        if $x >= $y {
+            $y
         } else{
-            $x as f32
+            $x
         }        
     };
 }
@@ -121,22 +120,22 @@ macro_rules! pwm_mode {
             },
             3 => {
                 let mut led_count: i8 = 0;
+
                 let mut dif: i8 = 0;
+                let mut dist: i8 = 0;
+
                 let mut val: u16 = 0;
                 let mut new_val: u16 = 0;
                 
                 $(
                     dif = ($pin_modes.counter - led_count).abs();
-                    val = (HIGH as f32 * gaussian(min!((LED_COUNT - dif).abs(), dif) ) ) as u16;
-                    if $pin_modes.initial {  
-                        $pwm_channel_ident.set_duty(val);
-                    }
-                    else {
-                        new_val = linear($pwm_channel_ident.get_duty(), val, 
-                        $pin_modes._trail_speed - $pin_modes.get_timer());
-                        
-                        $pwm_channel_ident.set_duty(new_val);
-                    }                    
+                    dist = min!((LED_COUNT - dif).abs(), dif);
+
+                    val = (HIGH as f32 * breath_approx(dist)) as u16;
+                    new_val = linear($pwm_channel_ident.get_duty(), val, 
+                                     $pin_modes.trail_speed - $pin_modes.time_counter);
+                    
+                    $pwm_channel_ident.set_duty(new_val);                   
                     
                     led_count += 1;
                 )*
@@ -148,8 +147,13 @@ macro_rules! pwm_mode {
     };
 }
 
-pub fn gaussian(x: f32) -> f32 {
-    expf(-powf((x as f32 / LED_COUNT as f32) - 0.5, 2.0) / (2.0*powf(0.1, 2.0)) )
+pub fn breath_approx(x: i8) -> f32 {
+    match x {
+        0 => 1.0,
+        1 => 0.3,
+        2 => 0.05,
+        _ => 0.0,
+    }
 }
 
 pub fn linear(actual: u16, target: u16, dif: u16) -> u16 {
@@ -162,9 +166,8 @@ pub struct PinModes {
     pub i: u16,
     pub increasing: bool,
     pub counter: i8,
-    _time_counter: u16,
-    pub _trail_speed: u16,
-    pub initial: bool,
+    pub time_counter: u16,
+    pub trail_speed: u16,
 }
 
 impl PinModes {
@@ -174,9 +177,8 @@ impl PinModes {
             i: 0,
             increasing: true,
             counter: 0,
-            _time_counter: 0,
-            _trail_speed: 50 * 5, //5 ms for key debounce
-            initial: true
+            time_counter: 0,
+            trail_speed: 2000, //50 * 5, 5 ms for key debounce
         } 
     }
 
@@ -186,10 +188,8 @@ impl PinModes {
             1 => self.i = LOW,
             2 => self.i = HIGH,
             3 => {
-                self.i = 0;
                 self.counter = 0;
-                self._time_counter = 0;
-                self.initial = true;
+                self.time_counter = 0;
             },
             _ => (),
         }
@@ -232,19 +232,11 @@ impl PinModes {
     }
 
     pub fn increase_timer(&mut self) {
-        self._time_counter += 1;
-        if self.initial {
-            self.initial = false;
-        }
-        if self._time_counter == self._trail_speed {
-            self._time_counter = 0;
+        self.time_counter += 1;
+        if self.time_counter == self.trail_speed {
+            self.time_counter = 0;
             self.counter = (self.counter + 1) % (LED_COUNT); 
         }
-    }
-
-    pub fn get_timer(&mut self) -> u16 {
-        self._time_counter
-
     }
     
 }
