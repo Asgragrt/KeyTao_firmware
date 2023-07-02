@@ -72,7 +72,10 @@ fn main() -> ! {
     let core1 = &mut cores[1];
     
     let _test = core1.spawn(unsafe { &mut CORE1_STACK.mem }, move || {
+        let mut pac = unsafe { pac::Peripherals::steal() };
         let core = unsafe { pac::CorePeripherals::steal() };
+
+        let mut sio = hal::Sio::new(pac.SIO);
 
         let mut led_pin = pins.gpio16.into_push_pull_output();
         let led_button  = pins.gpio17.into_pull_up_input();
@@ -102,10 +105,17 @@ fn main() -> ! {
             prev = led_button.is_high().unwrap();
             delay.delay_ms(5);
 
+            let change_led = sio.fifo.read();
+            
+            if let Some(1) = change_led {
+                pin_modes.increase_mode();
+                delay.delay_ms(1500);
+            }
+            sio.fifo.drain();
+
             if prev && led_button.is_low().unwrap() {
                 led_pin.toggle().ok();
-                let temp = pin_modes.get_mode();
-                pin_modes.set_mode((temp + 1) % MODE_COUNT);
+                pin_modes.increase_mode();
             }
             pwm_mode!(pin_modes, [pwm1_a, pwm1_b, pwm2_a, pwm2_b, pwm3_a, pwm5_a, pwm5_b]);
             
@@ -147,7 +157,8 @@ fn main() -> ! {
         pins.gpio4, [Keyboard::I];
         pins.gpio5, [Keyboard::O];
         pins.gpio6, [Keyboard::P];
-        pins.gpio7, [Keyboard::LeftControl, Keyboard::O]);
+        pins.gpio7, [Keyboard::LeftControl, Keyboard::O];
+        pins.gpio8, [Keyboard::F1]);
 
     let pin_build = &get_pin_keys(pins, keys);      
 
@@ -162,7 +173,7 @@ fn main() -> ! {
     loop {
         //Poll the keys every 1ms
         if input_count_down.wait().is_ok() {
-            let keys = get_keys(pin_build);
+            let (keys, change_mode) = get_keys(pin_build);
 
             match keyboard.device().write_report(keys) {
                 Err(UsbHidError::WouldBlock) => {}
@@ -172,6 +183,10 @@ fn main() -> ! {
                     core::panic!("Failed to write keyboard report: {:?}", e)
                 }
             };
+
+            if !sio.fifo.is_read_ready() {
+                sio.fifo.write(change_mode as u32);
+            }
         }
 
         //Tick once per ms
@@ -201,12 +216,18 @@ fn main() -> ! {
     }
 }
 
-fn get_keys(pins: &[PinKeys]) -> Vec<Keyboard, KEY_COUNT>{
+//At least 3 keys
+fn get_keys(pins: &[PinKeys]) -> (Vec<Keyboard, KEY_COUNT>, bool){
     let mut key_return: Vec<Keyboard, KEY_COUNT> = Vec::new();
-    for i in 0..KEY_COUNT {
+    let mut limit: usize = KEY_COUNT;
+    let led_change: bool = pins[KEY_COUNT - 2].get_pin().is_low().unwrap() && pins[KEY_COUNT - 1].get_pin().is_low().unwrap();
+    if  led_change {
+        limit -= 2;
+    }
+    for i in 0..limit {
         if pins[i].get_pin().is_low().unwrap() {
             key_return.extend(pins[i].get_keys().clone());
         }
     }
-    return key_return;
+    return (key_return, led_change);
 }

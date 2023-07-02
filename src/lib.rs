@@ -5,7 +5,7 @@ use embedded_hal::digital::v2::InputPin;
 use heapless::Vec;
 
 //Keys used
-pub const KEY_COUNT: usize = 8;
+pub const KEY_COUNT: usize = 9;
 
 //Struct for easier gpio -> keypress interface
 #[derive(Copy, Clone)]
@@ -66,7 +66,7 @@ pub const LOW: u16 = 0;
 pub const HIGH: u16 = 55_000;
 
 pub const LED_COUNT: i8 = 7;
-pub const MODE_COUNT: u8 = 4;
+pub const MODE_COUNT: u8 = 6;
 
 #[macro_export]
 macro_rules! def_pwm {
@@ -141,6 +141,11 @@ macro_rules! pwm_mode {
                 )*
                 $pin_modes.increase_timer();
             },
+            4 | 5 => {
+                $(
+                    $pwm_channel_ident.set_duty($pin_modes.i);
+                )*                
+            },
 
             _ => (),
         }
@@ -191,13 +196,19 @@ impl PinModes {
                 self.counter = 0;
                 self.time_counter = 0;
             },
+            4 => self.i = LOW,
+            5 => self.i = HIGH,
             _ => (),
         }
         self._mode = mode;
     }
 
-    pub fn get_mode(&mut self) -> u8 {
+    pub fn get_mode(&self) -> u8 {
         self._mode
+    }
+
+    pub fn increase_mode(&mut self) {
+        self.set_mode((self.get_mode() + 1) % MODE_COUNT)
     }
 
     pub fn breathing(&mut self) {
