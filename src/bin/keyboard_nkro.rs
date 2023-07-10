@@ -77,34 +77,28 @@ fn main() -> ! {
 
         let mut sio = hal::Sio::new(pac.SIO);
 
-        let mut led_pin = pins.gpio16.into_push_pull_output();
-        let led_button  = pins.gpio17.into_pull_up_input();
-
         let mut delay = cortex_m::delay::Delay::new(core.SYST, SYS_FREQ);
 
         let mut pwm_slices = hal::pwm::Slices::new(pac.PWM, &mut pac.RESETS);
 
         //Generates the necessary pwm setup for each pin
-        
         def_pwm!(pwm_slices, 
-            [pwm1_slice, pwm1, [pins.gpio18, channel_a, pwm1_a;
+            [pwm0_slice, pwm0, [pins.gpio17, channel_b, pwm0_b];
+             pwm1_slice, pwm1, [pins.gpio2 , channel_a, pwm1_a;
                                 pins.gpio19, channel_b, pwm1_b];
-            pwm2_slice, pwm2,  [pins.gpio20, channel_a, pwm2_a;
+             pwm2_slice, pwm2, [pins.gpio4 , channel_a, pwm2_a;
                                 pins.gpio21, channel_b, pwm2_b];
-            pwm3_slice, pwm3,  [pins.gpio22, channel_a, pwm3_a];
-            pwm5_slice, pwm5,  [pins.gpio26, channel_a, pwm5_a;
-                                pins.gpio27, channel_b, pwm5_b]]);
-
+             pwm3_slice, pwm3, [pins.gpio6 , channel_a, pwm3_a;
+                                pins.gpio23, channel_b, pwm3_b];
+             pwm4_slice, pwm4, [pins.gpio25, channel_b, pwm4_b];
+             pwm6_slice, pwm6, [pins.gpio13, channel_b, pwm6_b];
+             pwm7_slice, pwm7, [pins.gpio15, channel_b, pwm7_b]]);
+        
+        //Struct for easier mode interfacing
         let mut pin_modes = PinModes::new();
 
-        led_pin.set_low().ok();
-        let mut prev: bool;
-        
-
         loop {
-            prev = led_button.is_high().unwrap();
-            delay.delay_ms(5);
-
+            //Cheking for a led mode change
             let change_led = sio.fifo.read();
             
             if let Some(1) = change_led {
@@ -113,13 +107,20 @@ fn main() -> ! {
             }
             sio.fifo.drain();
 
-            if prev && led_button.is_low().unwrap() {
-                led_pin.toggle().ok();
-                pin_modes.increase_mode();
-            }
-            //Probar que se repitan los leds
-            pwm_mode!(pin_modes, [pwm1_a, pwm1_b, pwm2_a, pwm2_b, pwm3_a, pwm5_a, pwm5_b]);
+            //Led order
+            pwm_mode!(pin_modes,
+                [pwm1_a,
+                pwm2_a,
+                pwm3_a,
+                pwm7_b,
+                pwm6_b,
+                pwm1_b,
+                pwm0_b,
+                pwm2_b,
+                pwm3_b,
+                pwm4_b]);
             
+            delay.delay_ms(5);
         }
     });
 
@@ -146,20 +147,20 @@ fn main() -> ! {
         .build();
 
     //Status led pin
-    let mut led_pin = pins.gpio25.into_push_pull_output();
+    let mut led_pin = pins.gpio0.into_push_pull_output();
 
     //GPIO -> Keypress relations
     let (pins, keys): ([&dyn InputPin<Error = core::convert::Infallible>; KEY_COUNT], 
         [&Vec<Keyboard, 4>; KEY_COUNT]) = pin_keys!(
-        pins.gpio0, [Keyboard::Q];
-        pins.gpio1, [Keyboard::W];
-        pins.gpio2, [Keyboard::E];
-        pins.gpio3, [Keyboard::Space];
-        pins.gpio4, [Keyboard::I];
-        pins.gpio5, [Keyboard::O];
-        pins.gpio6, [Keyboard::P];
-        pins.gpio7, [Keyboard::LeftControl, Keyboard::O];
-        pins.gpio8, [Keyboard::F1]);
+        pins.gpio1,  [Keyboard::S];
+        pins.gpio3,  [Keyboard::D];
+        pins.gpio5,  [Keyboard::F];
+        pins.gpio12, [Keyboard::Space];
+        pins.gpio20, [Keyboard::J];
+        pins.gpio22, [Keyboard::K];
+        pins.gpio24, [Keyboard::L];
+        pins.gpio14, [Keyboard::LeftControl, Keyboard::O];
+        pins.gpio16, [Keyboard::F1]);
 
     let pin_build = &get_pin_keys(pins, keys);      
 

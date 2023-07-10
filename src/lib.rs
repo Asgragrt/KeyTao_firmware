@@ -64,7 +64,7 @@ macro_rules! pin_keys {
 pub const LOW: u16 = 0;
 pub const HIGH: u16 = 55_000;
 
-pub const LED_COUNT: i8 = 7;
+pub const LED_COUNT: i8 = 10;
 pub const MODE_COUNT: u8 = 8;
 
 #[macro_export]
