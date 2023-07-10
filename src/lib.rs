@@ -1,5 +1,4 @@
 #![no_std]
-
 use usbd_human_interface_device::page::Keyboard;
 use embedded_hal::digital::v2::InputPin;
 use heapless::Vec;
@@ -66,7 +65,7 @@ pub const LOW: u16 = 0;
 pub const HIGH: u16 = 55_000;
 
 pub const LED_COUNT: i8 = 7;
-pub const MODE_COUNT: u8 = 6;
+pub const MODE_COUNT: u8 = 8;
 
 #[macro_export]
 macro_rules! def_pwm {
@@ -118,7 +117,7 @@ macro_rules! pwm_mode {
                     $pwm_channel_ident.set_duty($pin_modes.i);
                 )*
             },
-            3 => {
+            3 | 4 | 5 => {
                 let mut led_count: i8 = 0;
 
                 let mut dif: i8 = 0;
@@ -129,7 +128,25 @@ macro_rules! pwm_mode {
                 
                 $(
                     dif = ($pin_modes.counter - led_count).abs();
-                    dist = min!((LED_COUNT - dif).abs(), dif);
+
+                    match $pin_modes.get_mode() {
+                        3 => {
+                            dist = min!(dif, (LED_COUNT - dif).abs());
+                        },
+                        4 => {
+                            dist = min!(dif, (LED_COUNT - 1 
+                                - $pin_modes.counter - led_count).abs());
+                        },
+                        5 | _ => {
+                            if led_count < LED_COUNT / 2 + LED_COUNT % 2 {
+                                dist = min!(dif, (LED_COUNT - dif).abs());
+                            }
+                            else {
+                                dist = min!((LED_COUNT - 1 - $pin_modes.counter - led_count).abs(), 
+                                (LED_COUNT - (LED_COUNT - 1 - $pin_modes.counter - led_count).abs()).abs());
+                            }
+                        }
+                    }
 
                     val = (HIGH as f32 * breath_approx(dist)) as u16;
                     new_val = linear($pwm_channel_ident.get_duty(), val, 
@@ -141,12 +158,11 @@ macro_rules! pwm_mode {
                 )*
                 $pin_modes.increase_timer();
             },
-            4 | 5 => {
+            6 | 7 => {
                 $(
                     $pwm_channel_ident.set_duty($pin_modes.i);
                 )*                
             },
-
             _ => (),
         }
     };
@@ -189,15 +205,18 @@ impl PinModes {
 
     pub fn set_mode(&mut self, mode: u8) {
         match mode {
-            0 => self.i = LOW,
-            1 => self.i = LOW,
-            2 => self.i = HIGH,
-            3 => {
+            0 | 1 | 6 => self.i = LOW,
+            2 | 7     => self.i = HIGH,
+            3 | 4 | 5 => {
                 self.counter = 0;
                 self.time_counter = 0;
+                if mode == 6 {
+                    self.trail_speed = 350;
+                }
+                else {
+                    self.trail_speed = 250;
+                }
             },
-            4 => self.i = LOW,
-            5 => self.i = HIGH,
             _ => (),
         }
         self._mode = mode;

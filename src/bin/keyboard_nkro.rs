@@ -117,6 +117,7 @@ fn main() -> ! {
                 led_pin.toggle().ok();
                 pin_modes.increase_mode();
             }
+            //Probar que se repitan los leds
             pwm_mode!(pin_modes, [pwm1_a, pwm1_b, pwm2_a, pwm2_b, pwm3_a, pwm5_a, pwm5_b]);
             
         }
@@ -184,7 +185,7 @@ fn main() -> ! {
                 }
             };
 
-            if !sio.fifo.is_read_ready() {
+            if sio.fifo.read().is_none() {
                 sio.fifo.write(change_mode as u32);
             }
         }
