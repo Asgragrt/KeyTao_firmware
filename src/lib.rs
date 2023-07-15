@@ -2,6 +2,7 @@
 use usbd_human_interface_device::page::Keyboard;
 use embedded_hal::digital::v2::InputPin;
 use heapless::Vec;
+pub use core::cmp::min;
 
 //Keys used
 pub const KEY_COUNT: usize = 9;
@@ -59,6 +60,21 @@ macro_rules! pin_keys {
     };
 }
 
+//At least 2 keys and not your main ones
+pub fn get_keys(pins: &[PinKeys]) -> (Vec<Keyboard, KEY_COUNT>, bool){
+    let mut key_return: Vec<Keyboard, KEY_COUNT> = Vec::new();
+    let mut limit: usize = KEY_COUNT;
+    let led_change: bool = pins[KEY_COUNT - 2].get_pin().is_low().unwrap() && pins[KEY_COUNT - 1].get_pin().is_low().unwrap();
+    //Branchless optimization
+    limit -= 2 * (led_change as usize);
+    for i in 0..limit {
+        if pins[i].get_pin().is_low().unwrap() {
+            key_return.extend(pins[i].get_keys().clone());
+        }
+    }
+    return (key_return, led_change);
+}
+
 /*********LED CONTROL*/
 
 pub const LOW: u16 = 0;
@@ -81,17 +97,6 @@ macro_rules! def_pwm {
                 $pwm_channel_ident.output_to($pin);
             )*
         )*
-    };
-}
-
-#[macro_export]
-macro_rules! min{
-    ($x:expr, $y:expr) => {
-        if $x >= $y {
-            $y
-        } else{
-            $x
-        }        
     };
 }
 
@@ -119,40 +124,13 @@ macro_rules! pwm_mode {
             },
             3 | 4 | 5 => {
                 let mut led_count: i8 = 0;
-
-                let mut dif: i8 = 0;
-                let mut dist: i8 = 0;
-
-                let mut val: u16 = 0;
-                let mut new_val: u16 = 0;
                 
                 $(
-                    dif = ($pin_modes.counter - led_count).abs();
-
-                    match $pin_modes.get_mode() {
-                        3 => {
-                            dist = min!(dif, (LED_COUNT - dif).abs());
-                        },
-                        4 => {
-                            dist = min!(dif, (LED_COUNT - 1 
-                                - $pin_modes.counter - led_count).abs());
-                        },
-                        5 | _ => {
-                            if led_count < LED_COUNT / 2 + LED_COUNT % 2 {
-                                dist = min!(dif, (LED_COUNT - dif).abs());
-                            }
-                            else {
-                                dist = min!((LED_COUNT - 1 - $pin_modes.counter - led_count).abs(), 
-                                (LED_COUNT - (LED_COUNT - 1 - $pin_modes.counter - led_count).abs()).abs());
-                            }
-                        }
-                    }
-
-                    val = (HIGH as f32 * breath_approx(dist)) as u16;
-                    new_val = linear($pwm_channel_ident.get_duty(), val, 
-                                     $pin_modes.trail_speed - $pin_modes.time_counter);
-                    
-                    $pwm_channel_ident.set_duty(new_val);                   
+                    $pwm_channel_ident.set_duty(
+                        $pin_modes.displacement_duty(
+                            led_count, $pwm_channel_ident.get_duty()
+                        )
+                    );                   
                     
                     led_count += 1;
                 )*
@@ -205,19 +183,19 @@ impl PinModes {
 
     pub fn set_mode(&mut self, mode: u8) {
         match mode {
-            0 | 1 | 6 => self.i = LOW,
+            0 | 1 | 6 => self.i = LOW + 1,
             2 | 7     => self.i = HIGH,
             3 | 4 | 5 => {
                 self.counter = 0;
                 self.time_counter = 0;
-                if mode == 6 {
-                    self.trail_speed = 350;
-                }
-                else {
-                    self.trail_speed = 250;
-                }
+                //Branchless optimization
+                self.trail_speed = 300 * ((mode == 5) as u16) 
+                                + 250 * ((mode != 5) as u16);
             },
-            _ => (),
+            _ => {
+                self._mode = 0;
+                self.i = LOW;
+            },
         }
         self._mode = mode;
     }
@@ -231,34 +209,24 @@ impl PinModes {
     }
 
     pub fn breathing(&mut self) {
-        match self.increasing {
-            true => if self.i >= HIGH {
-                self.increasing = false;
-            } else {
-                self.i += ((( (self.i as f32) / 1500.0) as u16 ) << 1) + 1;
-            },
-            false => if self.i <= LOW {
-                self.increasing = true;
-            } else {
-                self.i -= ((( (self.i as f32) / 1500.0) as u16 ) << 1) + 1;
-            },
-        };
+        let difference: u16 = ((( (self.i as f32) / 1500.0) as u16 ) << 1) + 1;
+        //Branchless optimization
+        self.increasing = self.increasing ^ (self.i > HIGH || self.i < LOW + 1);
+        self.i = self.i + difference * (self.increasing as u16) 
+                - difference * (!self.increasing as u16);
     }
 
-    pub fn harsh_blink(&mut self) {
-        if self.i >= HIGH {
-            self.i = LOW;
-        } else {
-            self.i += ((( (self.i as f32) / 1500.0) as u16 ) << 1) + 1;
-        }
+    pub fn harsh_blink(&mut self) {  
+        //Branchless optimization      
+        self.i = (self.i * (self.i < HIGH) as u16) 
+                + ((( (self.i as f32) / 1500.0) as u16 ) << 1) + 1;
     }
 
     pub fn harsh_off(&mut self) {
-        if self.i <= LOW {
-            self.i = HIGH;
-        } else {
-            self.i -= ((( (self.i as f32) / 1500.0) as u16 ) << 1) + 1;
-        }
+        //Branchless optimization
+        self.i = (self.i * (self.i > LOW) as u16) + (HIGH * (self.i <= LOW) as u16)
+                - (((( (self.i as f32) / 1500.0) as u16 ) << 1) + 1);
+
     }
 
     pub fn increase_timer(&mut self) {
@@ -267,6 +235,37 @@ impl PinModes {
             self.time_counter = 0;
             self.counter = (self.counter + 1) % (LED_COUNT); 
         }
+    }
+
+    fn get_timer_position(&self) -> u16{
+        self.trail_speed - self.time_counter
+    }
+
+    fn breathing_displacement(&mut self, ext_counter: i8) -> i8{
+        //Pin modes counter = counter_1, led_count = counter_2
+        let mut dif: i8 = (self.counter - ext_counter).abs();
+        match self.get_mode() {
+            3 => {
+                min(dif, (LED_COUNT - dif).abs())
+            },
+            4 => {
+                min(dif, (LED_COUNT - 1 
+                    - self.counter - ext_counter).abs())
+            },
+            5 | _ => {
+                if ext_counter < LED_COUNT / 2 + LED_COUNT % 2 {
+                    min(dif, (LED_COUNT - dif).abs())
+                }
+                else {
+                    dif = (LED_COUNT - 1 - self.counter - ext_counter).abs();
+                    min(dif, (LED_COUNT - dif).abs())
+                }
+            }
+        }
+    }
+    pub fn displacement_duty(&mut self, led_count: i8, duty: u16) -> u16 {
+        let val: u16 = (HIGH as f32 * breath_approx(self.breathing_displacement(led_count)) ) as u16;
+        linear(duty, val, self.get_timer_position())
     }
     
 }

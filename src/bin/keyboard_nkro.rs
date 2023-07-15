@@ -96,6 +96,7 @@ fn main() -> ! {
         
         //Struct for easier mode interfacing
         let mut pin_modes = PinModes::new();
+        pin_modes.set_mode(5);
 
         loop {
             //Cheking for a led mode change
@@ -103,6 +104,7 @@ fn main() -> ! {
             
             if let Some(1) = change_led {
                 pin_modes.increase_mode();
+
                 delay.delay_ms(1500);
             }
             sio.fifo.drain();
@@ -141,16 +143,16 @@ fn main() -> ! {
 
     //https://pid.codes
     let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x1209, 0x0001))
-        .manufacturer("usbd-human-interface-device")
-        .product("NKRO Keyboard")
-        .serial_number("TEST")
+        .manufacturer("Asgragrt")
+        .product("Keytao")
+        .serial_number("1507")
         .build();
 
     //Status led pin
     let mut led_pin = pins.gpio0.into_push_pull_output();
 
     //GPIO -> Keypress relations
-    let (pins, keys): ([&dyn InputPin<Error = core::convert::Infallible>; KEY_COUNT], 
+    let (pins, keyboard_keys): ([&dyn InputPin<Error = core::convert::Infallible>; KEY_COUNT], 
         [&Vec<Keyboard, 4>; KEY_COUNT]) = pin_keys!(
         pins.gpio1,  [Keyboard::S];
         pins.gpio3,  [Keyboard::D];
@@ -162,7 +164,7 @@ fn main() -> ! {
         pins.gpio14, [Keyboard::LeftControl, Keyboard::O];
         pins.gpio16, [Keyboard::F1]);
 
-    let pin_build = &get_pin_keys(pins, keys);      
+    let pin_build = &get_pin_keys(pins, keyboard_keys);      
 
     led_pin.set_low().ok();
 
@@ -171,7 +173,7 @@ fn main() -> ! {
 
     let mut tick_count_down = timer.count_down();
     tick_count_down.start(1.millis());
-
+    
     loop {
         //Poll the keys every 1ms
         if input_count_down.wait().is_ok() {
@@ -216,20 +218,4 @@ fn main() -> ! {
             }
         }
     }
-}
-
-//At least 3 keys
-fn get_keys(pins: &[PinKeys]) -> (Vec<Keyboard, KEY_COUNT>, bool){
-    let mut key_return: Vec<Keyboard, KEY_COUNT> = Vec::new();
-    let mut limit: usize = KEY_COUNT;
-    let led_change: bool = pins[KEY_COUNT - 2].get_pin().is_low().unwrap() && pins[KEY_COUNT - 1].get_pin().is_low().unwrap();
-    if  led_change {
-        limit -= 2;
-    }
-    for i in 0..limit {
-        if pins[i].get_pin().is_low().unwrap() {
-            key_return.extend(pins[i].get_keys().clone());
-        }
-    }
-    return (key_return, led_change);
 }
