@@ -3,7 +3,6 @@
 
 use bsp::entry;
 use bsp::hal;
-//use core::convert::Infallible;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::*;
@@ -48,6 +47,10 @@ fn main() -> ! {
 
     let timer = hal::Timer::new(pac.TIMER, &mut pac.RESETS);
 
+    let mut count_down = timer.count_down();
+    count_down.start(250.millis());
+    let _ = nb::block!(count_down.wait());
+
     let mut sio = hal::Sio::new(pac.SIO);
     let pins = hal::gpio::Pins::new(
         pac.IO_BANK0,
@@ -70,6 +73,8 @@ fn main() -> ! {
     let mut mc = Multicore::new(&mut pac.PSM, &mut pac.PPB, &mut sio.fifo);
     let cores = mc.cores();
     let core1 = &mut cores[1];
+
+    watchdog.start(1_600_000.micros());
     
     let _test = core1.spawn(unsafe { &mut CORE1_STACK.mem }, move || {
         let mut pac = unsafe { pac::Peripherals::steal() };
@@ -104,7 +109,6 @@ fn main() -> ! {
             
             if let Some(1) = change_led {
                 pin_modes.increase_mode();
-
                 delay.delay_ms(1500);
             }
             sio.fifo.drain();
@@ -122,6 +126,7 @@ fn main() -> ! {
                 pwm3_b,
                 pwm4_b]);
             
+            watchdog.feed();
             delay.delay_ms(5);
         }
     });
@@ -152,7 +157,7 @@ fn main() -> ! {
     let mut led_pin = pins.gpio0.into_push_pull_output();
 
     //GPIO -> Keypress relations
-    let (pins, keyboard_keys): ([&dyn InputPin<Error = core::convert::Infallible>; KEY_COUNT], 
+    let (mcu_pins, keyboard_keys): ([&dyn InputPin<Error = core::convert::Infallible>; KEY_COUNT], 
         [&Vec<Keyboard, 4>; KEY_COUNT]) = pin_keys!(
         pins.gpio1,  [Keyboard::S];
         pins.gpio3,  [Keyboard::D];
@@ -164,7 +169,7 @@ fn main() -> ! {
         pins.gpio14, [Keyboard::LeftControl, Keyboard::O];
         pins.gpio16, [Keyboard::F1]);
 
-    let pin_build = &get_pin_keys(pins, keyboard_keys);      
+    let pin_build = &get_pin_keys(mcu_pins, keyboard_keys);      
 
     led_pin.set_low().ok();
 
